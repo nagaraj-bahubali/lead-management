@@ -1,0 +1,316 @@
+{
+	"name": "SQL_to_Snowflake",
+	"properties": {
+		"activities": [
+			{
+				"name": "Get_Old_Watermark",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": "SELECT LastLoadTimestamp AS OldWaterMark\nFROM WaterMark\nWHERE TableName = 'CompanyLeads' AND Status = 'Success'   ",
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "AzureSql_CompanyLeads",
+						"type": "DatasetReference"
+					}
+				},
+				"source": {
+					"type": "SnowflakeSource",
+					"query": "SELECT LastLoadTimestamp FROM LOAD_CONTROL WHERE TableName = 'CompanyLeads'"
+				}
+			},
+			{
+				"name": "Get_New_Watermark",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": "SELECT MAX(UpdatedDateUtc) AS NewWaterMark\nFROM CompanyLeads",
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "AzureSql_CompanyLeads",
+						"type": "DatasetReference"
+					}
+				}
+			},
+			{
+				"name": "Copy data",
+				"type": "Copy",
+				"dependsOn": [
+					{
+						"activity": "Get_Old_Watermark",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					},
+					{
+						"activity": "Get_New_Watermark",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": {
+							"value": "SELECT * FROM CompanyLeads\nWHERE UpdatedDateUtc > '@{activity('Get_Old_Watermark').output.firstRow.OldWaterMark}' \nAND UpdatedDateUtc <= '@{activity('Get_New_Watermark').output.firstRow.NewWaterMark}'",
+							"type": "Expression"
+						},
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"sink": {
+						"type": "SnowflakeV2Sink",
+						"importSettings": {
+							"type": "SnowflakeImportCopyCommand"
+						}
+					},
+					"enableStaging": true,
+					"stagingSettings": {
+						"linkedServiceName": {
+							"referenceName": "staging_area",
+							"type": "LinkedServiceReference"
+						},
+						"path": "stage-sql-to-snowflake"
+					},
+					"translator": {
+						"type": "TabularTranslator",
+						"mappings": [
+							{
+								"source": {
+									"name": "Id",
+									"type": "uniqueidentifier"
+								},
+								"sink": {
+									"name": "ID",
+									"type": "String"
+								}
+							},
+							{
+								"source": {
+									"name": "State",
+									"type": "int"
+								},
+								"sink": {
+									"name": "STATE",
+									"type": "Int32"
+								}
+							},
+							{
+								"source": {
+									"name": "CreatedDateUtc",
+									"type": "datetime2"
+								},
+								"sink": {
+									"name": "CREATEDDATEUTC",
+									"type": "DateTime"
+								}
+							},
+							{
+								"source": {
+									"name": "CancellationRequestDateUtc",
+									"type": "datetime2"
+								},
+								"sink": {
+									"name": "CANCELLATIONREQUESTDATEUTC",
+									"type": "DateTime"
+								}
+							},
+							{
+								"source": {
+									"name": "CancellationDateUtc",
+									"type": "datetime2"
+								},
+								"sink": {
+									"name": "CANCELLATIONDATEUTC",
+									"type": "DateTime"
+								}
+							},
+							{
+								"source": {
+									"name": "CancellationRejectionDateUtc",
+									"type": "datetime2"
+								},
+								"sink": {
+									"name": "CANCELLATIONREJECTIONDATEUTC",
+									"type": "DateTime"
+								}
+							},
+							{
+								"source": {
+									"name": "SoldEmployee",
+									"type": "nvarchar"
+								},
+								"sink": {
+									"name": "SOLDEMPLOYEE",
+									"type": "String"
+								}
+							},
+							{
+								"source": {
+									"name": "CancelledEmployee",
+									"type": "nvarchar"
+								},
+								"sink": {
+									"name": "CANCELLEDEMPLOYEE",
+									"type": "String"
+								}
+							},
+							{
+								"source": {
+									"name": "UpdatedDateUtc",
+									"type": "datetime2"
+								},
+								"sink": {
+									"name": "UPDATEDDATEUTC",
+									"type": "DateTime"
+								}
+							}
+						]
+					}
+				},
+				"inputs": [
+					{
+						"referenceName": "AzureSql_CompanyLeads",
+						"type": "DatasetReference"
+					}
+				],
+				"outputs": [
+					{
+						"referenceName": "Snowflake_CompanyLeads",
+						"type": "DatasetReference"
+					}
+				]
+			},
+			{
+				"name": "sp_UpsertWaterMark_on_Success",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "Copy data",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[dbo].[sp_UpsertWaterMark]",
+					"storedProcedureParameters": {
+						"LastLoadTimestamp": {
+							"value": {
+								"value": "@activity('Get_New_Watermark').output.firstRow.NewWaterMark ",
+								"type": "Expression"
+							},
+							"type": "Datetime"
+						},
+						"Status": {
+							"value": "Success",
+							"type": "String"
+						},
+						"TableName": {
+							"value": "CompanyLeads",
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "AzureSql_ls",
+					"type": "LinkedServiceReference"
+				}
+			},
+			{
+				"name": "sp_UpsertWaterMark_on_Failed",
+				"type": "SqlServerStoredProcedure",
+				"dependsOn": [
+					{
+						"activity": "Copy data",
+						"dependencyConditions": [
+							"Failed"
+						]
+					}
+				],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"storedProcedureName": "[dbo].[sp_UpsertWaterMark]",
+					"storedProcedureParameters": {
+						"LastLoadTimestamp": {
+							"value": {
+								"value": "@activity('Get_Old_Watermark').output.firstRow.OldWaterMark",
+								"type": "Expression"
+							},
+							"type": "Datetime"
+						},
+						"Status": {
+							"value": "Failed",
+							"type": "String"
+						},
+						"TableName": {
+							"value": "CompanyLeads",
+							"type": "String"
+						}
+					}
+				},
+				"linkedServiceName": {
+					"referenceName": "AzureSql_ls",
+					"type": "LinkedServiceReference"
+				}
+			}
+		],
+		"annotations": [],
+		"trigger": {
+			"type": "Schedule",
+			"recurrence": {
+				"frequency": "Minute",
+				"interval": 30
+			}
+		},
+		"lastPublishTime": "2025-02-16T18:47:10Z"
+	},
+	"type": "Microsoft.DataFactory/factories/pipelines"
+}

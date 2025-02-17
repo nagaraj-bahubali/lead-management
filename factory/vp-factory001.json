@@ -1,0 +1,9 @@
+{
+	"name": "vp-factory001",
+	"location": "germanywestcentral",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "1a039904-85d0-4322-8d3d-f5dce6a83123",
+		"tenantId": "7320328a-90df-42e2-847e-e196f9356be1"
+	}
+}
